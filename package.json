@@ -1,0 +1,44 @@
+{
+  "name": "trail-review",
+  "version": "0.1.0",
+  "description": "Local pull request review for AI-written code: walkthroughs, move detection, code navigation and Claude Code chat.",
+  "license": "SEE LICENSE IN LICENSE",
+  "author": "Diego Valadares Sá Fortes",
+  "contributors": [
+    "IARA (https://iara.app.br)"
+  ],
+  "type": "module",
+  "private": true,
+  "bin": {
+    "trail": "bin/trail.ts"
+  },
+  "scripts": {
+    "dev": "TRAIL_DEV_ORIGIN=http://localhost:4478 concurrently -k -n server,web \"bun --no-env-file --config=/dev/null --watch server/index.ts\" \"bun --bun vite\"",
+    "build": "bun --bun vite build",
+    "trail": "bun --no-env-file --config=/dev/null bin/trail.ts",
+    "serve": "bun --no-env-file --config=/dev/null bin/trail.ts serve",
+    "typecheck": "tsc --noEmit",
+    "test": "TRAIL_HOME=$(mktemp -d) bun test"
+  },
+  "dependencies": {
+    "dompurify": "^3.5.0",
+    "highlight.js": "^11.12.0",
+    "marked": "^18.3.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "zustand": "^5.1.0"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.4.5",
+    "@types/dompurify": "^3.0.5",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.3.0",
+    "concurrently": "^10.0.7",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.8"
+  },
+  "engines": {
+    "bun": ">=1.2"
+  }
+}
