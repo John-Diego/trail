@@ -19,7 +19,8 @@ export interface RunOptions {
 }
 
 // Nobody is at a terminal to answer a credential prompt; a command that asks must fail instead of waiting.
-const NO_PROMPT = { GIT_TERMINAL_PROMPT: '0', GH_PROMPT_DISABLED: '1' }
+// GH_HOST: Trail supports github.com only, whatever host the reader's gh is otherwise pointed at.
+const NO_PROMPT = { GIT_TERMINAL_PROMPT: '0', GH_PROMPT_DISABLED: '1', GH_HOST: 'github.com' }
 export const LONG = 15 * 60_000
 
 export class CommandError extends Error {

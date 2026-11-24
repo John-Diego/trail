@@ -10,7 +10,9 @@ import { spawn } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
 import { buildId, ENV_FILE, loadTrailEnv, ROOT, trailHome, trailPort } from '../shared/settings.ts'
-import { parseArgs, resolveTarget } from './args.ts'
+import { parseArgs, resolveTarget, type Target } from './args.ts'
+import { describeList, fetchList } from './list.ts'
+import { pick, status } from './picker.ts'
 
 const BUN_FLAGS = ['--no-env-file', '--config=/dev/null']
 const JSON_HEADERS = { 'Content-Type': 'application/json' }
@@ -27,6 +29,16 @@ const USAGE = `Trail: local pull request review
   trail <address>             A GitHub pull request address, with or without https://,
                               e.g. github.com/owner/repo/pull/123/files
                               Also accepted: owner/repo#123 and repo#123
+
+  trail <owner>/<repo>        List that repository's pull requests and choose one.
+  trail <repo>                Same, with the owner from TRAIL_OWNER. A repository address works too.
+  trail --list                List pull requests waiting for your review (across TRAIL_OWNER, if set)
+      Narrow any list with:   --mine | --author <login>     who wrote it (@me works)
+                              --for-me | --reviewer <login> whose review is requested (or org/team)
+                              --label <name>   --state open|closed|merged|all
+                              --search "<words>"   --limit <n>
+                              A value starting with a dash needs "=": --search=-label:wip
+      In the list:            arrows move, enter opens in Trail, type to filter, tab changes scope
 
   trail .                     Review the current branch of this repository, including uncommitted changes
   trail <path> --base <ref>   Review a local repository against a base branch.
@@ -117,6 +129,44 @@ async function importAndOpen(body: { kind: 'pr'; ref: string } | { kind: 'local'
   }
 }
 
+/** Mark pull requests that already have a review in Trail, if its server happens to be running. */
+async function markKnownReviews(rows: { repo: string; number: number; inTrail?: string }[]): Promise<void> {
+  if (!(await health())) return
+  try {
+    const reviews = (await (await fetch(`${BASE}/api/reviews`)).json()) as { repoLabel: string; number: number | null; viewedCount: number; hunkCount: number }[]
+    const known = new Map(reviews.filter((r) => r.number).map((r) => [`${r.repoLabel.toLowerCase()}#${r.number}`, `${r.viewedCount}/${r.hunkCount} viewed`]))
+    for (const row of rows) row.inTrail = known.get(`${row.repo.toLowerCase()}#${row.number}`)
+  } catch {
+    // Only a convenience; the list is complete without it.
+  }
+}
+
+/** List pull requests, let the reader choose one, and open it. Without a terminal, print the list instead. */
+async function listAndOpen(target: Extract<Target, { kind: 'list' }>, noOpen: boolean): Promise<void> {
+  const heading = describeList(target)
+  console.error(`Reading ${heading}…`)
+  const { rows, me } = await fetchList(target)
+  // A status message, so it goes where status goes: a script reading the list must not take it for a row.
+  if (!rows.length) return console.error(`No ${heading}.`)
+  await markKnownReviews(rows)
+  if (!process.stdin.isTTY || !process.stdout.isTTY) {
+    // Piped or scripted: one pull request per line, ready for another command to read.
+    for (const r of rows) console.log([`${r.repo}#${r.number}`, r.title, r.author, status(r, me)].join('\t'))
+    return
+  }
+  // At the limit there may be more than were fetched; say so instead of implying the list is complete.
+  const count = rows.length === target.filters.limit ? `first ${rows.length} (--limit for more)` : String(rows.length)
+  const { row: chosen, interrupted } = await pick(rows, me, `${heading} · ${count}`)
+  if (!chosen) {
+    console.error('No pull request chosen.')
+    // The usual exit status for Ctrl-C, so a script can tell it from leaving with Esc.
+    if (interrupted) process.exitCode = 130
+    return
+  }
+  console.log(`Opening ${chosen.repo}#${chosen.number}: ${chosen.title}`)
+  await importAndOpen({ kind: 'pr', ref: `${chosen.repo}#${chosen.number}` }, noOpen)
+}
+
 /**
  * Stops the server by asking the process that is answering on Trail's port who it is, then
  * signalling that process. A pid read from a file could be stale and belong to something else.
@@ -150,6 +200,7 @@ try {
     const target = resolveTarget(args, process.env.TRAIL_OWNER, ENV_FILE, (p) => fs.existsSync(p))
     if (target.kind === 'serve') await import(serverFile)
     else if (target.kind === 'stop') await stop()
+    else if (target.kind === 'list') await listAndOpen(target, args.noOpen)
     else if (target.kind === 'home') {
       await ensureServer()
       openBrowser(BASE, args.noOpen)

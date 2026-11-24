@@ -44,6 +44,8 @@ browser then opens the review at http://localhost:4477.
 
 Run these from this folder.
 
+### Opening one pull request or a local repository
+
 | Command | What it reviews |
 | --- | --- |
 | `bun trail my-repo 123` | Pull request 123 of `<TRAIL_OWNER>/my-repo` |
@@ -52,8 +54,52 @@ Run these from this folder.
 | `bun trail other-org/my-repo/123` | The same in one word |
 | `bun trail https://github.com/owner/repo/pull/123` | A pull request by its GitHub address |
 | `bun trail github.com/owner/repo/pull/123/files` | Any pasted form of that address works: without `https://`, or with `/files`, `?diff=split`, `#discussion…` after the number |
-| `bun trail ~/code/app` | A local repository: its current branch against the base branch, uncommitted changes included |
+| `bun trail ~/code/app` | A local repository: its current branch against the base branch, uncommitted changes included. A local path starts with `.`, `/` or `~` |
 | `bun trail ~/code/app --base develop` | The same, against a base branch you choose |
+
+### Choosing from a list
+
+Leave out the number and Trail lists the pull requests for you to pick one, so you never
+have to look the number up on GitHub.
+
+| Command | What it lists |
+| --- | --- |
+| `bun trail my-repo` | Open pull requests of `<TRAIL_OWNER>/my-repo` |
+| `bun trail other-org/my-repo` | The same for any repository. Its address (`github.com/other-org/my-repo`) works too |
+| `bun trail --list` | Open pull requests waiting for your review, across `TRAIL_OWNER` (across all of GitHub when no owner is set) |
+
+In the list, use the arrow keys and press Enter to open the pull request in Trail. Start
+typing to narrow the list by title, number, author or branch; `author:name`,
+`reviewer:name` and `label:name` look in one field. Tab switches between all pull
+requests, those waiting for your review, and your own. Esc leaves.
+
+Each row shows the size of the change, its age, and its review state: draft, approved,
+changes requested, or whose review is requested. Pull requests you have already opened in
+Trail show how far you got.
+
+Lists across repositories (`--list`) come from GitHub's search, which reports less: no
+sizes and no review state. There, a row says nothing about reviews, which does not mean none
+is needed, and the "waiting for my review" tab is only offered when that is what was asked for.
+
+To fetch a narrower list from GitHub in the first place, add filters:
+
+| Filter | Meaning |
+| --- | --- |
+| `--mine` or `--author <login>` | Written by you, or by someone else |
+| `--for-me` or `--reviewer <login>` | Review requested from you, from someone else, or from a team (`org/team`) |
+| `--label <name>` | Carrying a label |
+| `--state open\|closed\|merged\|all` | Default is `open` |
+| `--search "<words>"` | Anything in GitHub's search syntax. Write `--search=-label:wip`, with `=`, when it starts with a dash |
+| `--limit <n>` | How many to fetch. Default is 50 |
+
+For example, `bun trail my-repo --for-me` lists what is waiting for you in one repository,
+and `bun trail --list --mine` lists your own open pull requests across `TRAIL_OWNER`.
+Across repositories, giving any filter replaces the default "waiting for your review".
+
+When the output is piped instead of shown in a terminal, the list is printed one pull
+request per line. Leaving the list with Ctrl-C ends with exit status 130.
+
+### Other commands
 
 | Command | What it does |
 | --- | --- |
@@ -63,9 +109,17 @@ Run these from this folder.
 
 Add `--no-open` to any command to print the address without opening the browser.
 
-Quote an address that contains `?` or `#` so your shell passes it through unchanged. A local
-folder whose name looks like `owner/repo/123` must be written with `./` in front; if such a
-folder exists, Trail asks which one you mean instead of guessing. Only github.com is supported. The box
+Quote an address that contains `?` or `#` so your shell passes it through unchanged. Only
+github.com is supported.
+
+How Trail tells a folder from a GitHub name:
+
+- Anything starting with `.`, `/` or `~` is a folder. Write a folder in the current
+  directory as `./my-folder`.
+- Any other word is read as a GitHub repository or pull request.
+- When such a word also exists on disk, Trail stops and asks which one you mean, instead of
+  guessing. Two exceptions, where only one reading is possible: with `--base` it is the
+  folder, and a single name with no owner configured is the folder. The box
 on the home page accepts the same forms.
 
 To use `trail` from any folder, run `bun link` here once. After that `trail my-repo 123`

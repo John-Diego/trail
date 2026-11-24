@@ -54,6 +54,39 @@ export function parsePrRef(text: string): PrRef | null {
   return null
 }
 
+export interface RepoRef {
+  /** Missing when only the repository was named; the caller supplies the default owner. */
+  owner?: string
+  repo: string
+}
+
+const REPO_FORMS: RegExp[] = [
+  // A repository address, optionally its pull request list: github.com/owner/repo, …/repo/pulls
+  // A query string (?q=…) is not accepted: it is a filter, and dropping it would list more than was asked for.
+  /^(?:https?:\/\/)?(?:www\.)?github\.com\/([^/\s?#]+)\/([^/\s?#]+?)(?:\/pulls)?\/?(?:#\S*)?$/i,
+  // owner/repo
+  /^([^/\s#]+)\/([^/\s#]+?)\/?$/,
+  // repo, owner to be filled in
+  /^()([^/\s#]+)$/,
+]
+
+/**
+ * The repository a piece of text names, without a pull request number: the "incomplete"
+ * forms of a reference. Null when the text is not one (a path such as ./a/b, for instance).
+ */
+export function parseRepoRef(text: string): RepoRef | null {
+  const input = text.trim()
+  for (const form of GITHUB.test(input) ? REPO_FORMS.slice(0, 1) : REPO_FORMS) {
+    const m = form.exec(input)
+    if (!m) continue
+    const owner = m[1]
+    const repo = m[2].replace(/\.git$/i, "")
+    if ((owner && !NAME.test(owner)) || !NAME.test(repo)) return null
+    return { ...(owner ? { owner } : {}), repo }
+  }
+  return null
+}
+
 /** True for a github.com address, whether or not it points at a pull request. */
 export function isGithubAddress(text: string): boolean {
   return GITHUB.test(text.trim())
