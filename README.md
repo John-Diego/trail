@@ -2,8 +2,9 @@
 
 Trail is a command-line tool and local web app for reviewing pull requests, built for
 changes written by AI coding agents. You pick a pull request in the terminal, and Trail
-opens it in your browser with Claude Code next to the diff. It runs entirely on your own
-machine and uses your existing GitHub and Claude Code logins.
+opens it in your browser with Claude Code next to the diff. Trail runs on your own machine,
+with no online service or account of its own, and uses your existing GitHub and Claude Code
+logins.
 
 It helps with the three things that make AI-written pull requests tiring to review:
 
@@ -12,6 +13,21 @@ It helps with the three things that make AI-written pull requests tiring to revi
 | The change is spread over many files, listed alphabetically. | Claude writes a **walkthrough**: the hunks grouped into chapters, in the order the logic runs. |
 | Small methods were moved between files, shown as a deletion and an addition. | **Moved code is folded** into one line that links to where it went. |
 | You have to leave the diff to see what a function does. | **Click any name** in the diff to see its definition and usages. |
+
+Trail is an independent project. It is not affiliated with, or endorsed by, Anthropic or GitHub.
+
+## Contents
+
+- [Requirements](#requirements) and [Install](#install)
+- [First review](#first-review)
+- [Commands](#commands)
+- [The review page](#the-review-page)
+- [Settings](#settings) and [Updating](#updating)
+- [What Trail does on your machine and on GitHub](#what-trail-does-on-your-machine-and-on-github)
+- [Reviewing code you do not trust](#reviewing-code-you-do-not-trust)
+- [Troubleshooting](#troubleshooting) and [Limits](#limits)
+- [Development](#development)
+- [Licence](#licence)
 
 ## Requirements
 
@@ -22,7 +38,8 @@ It helps with the three things that make AI-written pull requests tiring to revi
 | [GitHub CLI](https://cli.github.com) (`gh`), logged in | any recent | Pull requests. Not needed for local repositories. |
 | [Claude Code](https://claude.com/claude-code) (`claude`), logged in | a current release | Walkthroughs, questions and edits |
 
-Trail has been used on macOS. Linux should work; Windows is untested.
+Trail has been used on macOS. Linux should work. Windows is untested, and is not safe for
+code you do not trust: see [Reviewing code you do not trust](#reviewing-code-you-do-not-trust).
 
 ## Install
 
@@ -194,6 +211,7 @@ start at Opus and Medium, and your choice is remembered.
 | `m` / `e` | Next model / next effort level |
 | `f` | Fold or unfold moved code |
 | `1` `2` `3` | Claude, Navigate, Notes |
+| `[` / `]` | Back / forward in Navigate |
 | `?` | Show all shortcuts |
 
 ## Settings
@@ -234,13 +252,21 @@ or an import is in the middle of something. In that case it tells you, and you r
   `~/.trail/repos`.
 - **GitHub, write:** only when you press a button and confirm. **Submit to GitHub** posts
   your notes as one review. **Commit and push** pushes Claude's edits to the pull request
-  branch. Nothing else is ever sent.
+  branch. Trail itself sends nothing else to GitHub. Another program on your computer could
+  ask Trail's server for the same two things: see
+  [Reviewing code you do not trust](#reviewing-code-you-do-not-trust).
 - **Claude:** questions and walkthroughs use your own Claude Code login, as if you had run
   `claude` in a terminal, and count against your own plan. Trail has no API key of its own.
+  The code and diffs Claude reads to answer are sent to Anthropic, or to whichever provider
+  your Claude Code is set up to use, exactly as when you use Claude Code yourself.
 - **Your repositories:** for a pull request, Claude works in Trail's own checkout under
   `~/.trail/worktrees`, never in your copy. For a local review, Edit mode changes your
   working tree directly.
-- **Your notes, viewed marks and conversations** stay in `~/.trail/trail.db`.
+- **Your notes, viewed marks and conversations** are kept in `~/.trail/trail.db`. Claude Code
+  also keeps its own record of each conversation under `~/.claude/projects`, as it does for
+  any session.
+- **Nothing else:** Trail has no telemetry and no update check. It contacts nothing itself;
+  everything that leaves your machine goes through `git`, `gh` or `claude`.
 
 ## Reviewing code you do not trust
 
@@ -249,18 +275,47 @@ Trail assumes that:
 
 - Claude Code starts in the pull request's checkout with `--restricted --safe-mode`. No
   hooks, plugins, settings or `CLAUDE.md` are loaded, from the pull request or from your own
-  setup, so nothing in the checkout can run a program on your machine. One consequence: the
-  "Auto" model there is Claude Code's built-in default, not the one in your settings.
+  setup, so nothing in the checkout can make Claude Code run a program. Settings managed by
+  your organisation still apply. One consequence: the "Auto" model there is Claude Code's
+  built-in default, not the one in your settings.
 - A local repository gets your normal Claude Code setup only if you have already accepted
   Claude Code's trust prompt for that folder.
-- Claude can read and search files, and edit them in Edit mode. It has no shell.
+- Claude can read and search files, and edit them in Edit mode. It has no shell. In a pull
+  request's checkout its file tools are limited to that checkout and Trail's copy of the
+  diff, and refuse to follow a symbolic link out of them.
 - Text from GitHub is cleaned before it is shown. Titles and branch names cannot send
   control codes to your terminal, and descriptions and answers on the page cannot contain
   forms or images. Links on the page work only to github.com.
-- The web page is reachable only from your own machine, and only by Trail's own page.
+- Trail's web server listens only on your own machine and refuses requests that come from
+  other websites.
 - Trail takes nothing from the folder you run it in. Running `trail .` inside another
   project does not load that project's `.env` or any of its configuration: the installed
-  command is one self-contained file, and its settings live in your home folder.
+  command is a few bundled files that load nothing from the folder you run them in, and its
+  settings live in your home folder.
+
+What these measures do not cover:
+
+- **Other accounts on the same computer.** The web server has no password. Another account
+  on the computer can connect to it and use Trail as you: read the code under review, run
+  Claude, push Claude's edits and post reviews. Trail's data folder is also created with
+  your system's default permissions, which often let other accounts read it. Do not run
+  Trail on a computer that people you do not trust can log in to. (A program running under
+  your own account can do the same, but it could already use your GitHub login without
+  Trail.)
+- **Windows.** Trail starts `git` and `claude` by name from inside the checkout, and on
+  Windows a program is looked for in the current folder first. Code that contains its own
+  `git.exe` could have it run. Do not open code you do not trust with Trail on Windows,
+  whether as a pull request or as a local folder.
+- **Git filter programs.** Git runs the filter programs set up in your own Git
+  configuration, such as Git LFS, on the files a pull request marks for them in its
+  `.gitattributes`. With Git LFS, a pull request can also name the server the files are
+  downloaded from. If you use Git LFS, set `GIT_LFS_SKIP_SMUDGE=1` in the terminal that
+  starts Trail's server, which tells Git LFS not to download files when a pull request is
+  checked out.
+- **Environment variables.** Trail's background server keeps the environment variables of
+  the terminal that started it. If a project's tooling puts variables such as `GH_TOKEN` or
+  `ANTHROPIC_API_KEY` in your shell, reviews use them until the server stops. Run
+  `trail stop` and start Trail again from a clean terminal.
 
 Claude is told to treat text in the repository as material under review, not as
 instructions. That lowers the risk of a pull request steering its answers but cannot remove
@@ -274,10 +329,10 @@ data folder, settings file and port Trail is using.
 | Message or symptom | What to do |
 | --- | --- |
 | `Trail needs Node.js 22.13 or newer` | Update Node.js, then run the command again. |
-| `No owner for "my-repo"` | Run `trail config owner <name>`, or add `--owner <name>`. |
+| `No owner for "my-repo"`, or `"my-repo" … has no owner to look it up under on GitHub` | Run `trail config owner <name>`, or add `--owner <name>`. |
 | `Could not resolve to a Repository` | The owner or repository name is wrong, or your `gh` login cannot see it. Check `gh auth status`. |
 | `… is a file or folder here and also reads as …` | Write `./name` for the folder, or add `--list` (or the number) for the GitHub repository. |
-| `The claude command was not found` | Install Claude Code and make sure `claude` runs in your terminal. |
+| ``The `claude` command was not found`` | Install Claude Code and make sure `claude` runs in your terminal. |
 | `Trail did not start` | Read `server.log` in the data folder that `trail doctor` shows. Most often the port is taken: run `trail config port <number>`. |
 | `… is in use by a Trail server for another data folder` | Two Trails are set to the same port. Give one of them another with `trail config port <number>`. |
 | Refresh says Claude is still working | Wait for the answer to finish or press **Stop** in the chat, then refresh. |
@@ -289,6 +344,9 @@ data folder, settings file and port Trail is using.
 - Code counts as moved only if its text is identical. A method that was moved and edited
   shows its edited lines as ordinary changes. So does code that changes indentation inside
   one file, because that usually means an `if` or a loop was added or removed around it.
+- A moved block is recognised only when it has at least three lines of real content; a line
+  holding just a brace or a few characters does not count. A shorter method that moved
+  shows as a deletion and an addition.
 - A viewed mark is tied to a hunk and the lines around it. If new commits change either,
   the hunk comes back as not viewed.
 - After a refresh, a note follows its line if the line moved. If the line changed, the note
@@ -308,12 +366,15 @@ Trail is TypeScript and runs on Node.js. To work on it from a clone of the repos
 
 ```sh
 npm install
-npm run build              # builds the web page and the two files that get published
+npm run build              # builds everything that gets published, into dist/
 npm run trail -- my-repo   # runs the command from source
 npm run dev                # server on :4477 restarting on change, web page on :4478 with reload
 npm test
 npm run typecheck
 ```
+
+`npm run dev` uses the same port and data folder as an installed Trail. Run `trail stop`
+first, or give the development copy its own with `TRAIL_HOME` and `TRAIL_PORT`.
 
 | Folder | Contents |
 | --- | --- |
@@ -321,12 +382,15 @@ npm run typecheck
 | `server/` | Local web server: import (`importer.ts`), diff parsing (`diff.ts`), move detection (`moves.ts`), definition index (`symbols.ts`), Claude Code bridge (`claude.ts`, `chat.ts`, `walkthrough.ts`) |
 | `web/src/` | The page, in React |
 | `shared/` | Types, pull request reference parsing and settings used by more than one part |
+| `scripts/` | Build steps: the list of third-party licences (`third-party.ts`) |
 
-The published package contains only `dist/`: `cli.js` (a few lines that check the Node
-version before anything else loads), `main.js` (the command) and `server.js`, each bundled
-with no dependencies to install, and the built web page. `npm pack` shows exactly what
-would be published. Reviews are stored with Node's built-in SQLite, which is why Node 22.13
-is the minimum.
+The published package contains `dist/`, plus this README, `LICENSE` and `NOTICE`. In `dist/`
+are `cli.js` (a few lines that check the Node version before anything else loads), `main.js`
+(the command) and `server.js`, each bundled with no dependencies to install, the built web
+page, and `THIRD_PARTY_LICENSES.txt`. That last file holds the licences of the libraries
+compiled into the others; the build writes it from what it bundles, and stops if a bundled
+library has no licence file. `npm pack` shows exactly what would be published. Reviews are
+stored with Node's built-in SQLite, which is why Node 22.13 is the minimum.
 
 To change the model and effort Trail starts with, edit `DEFAULT_SETTINGS` in `shared/types.ts`.
 
@@ -351,6 +415,11 @@ in [LICENSE](LICENSE); this is a summary.
 The terms are the Apache License 2.0 with the Commons Clause, which removes the right to
 sell, and an authorship condition. Because of the no-selling rule this is a
 source-available licence, not an open-source one in the formal sense.
+
+The published package also contains libraries by other authors, such as React and
+highlight.js, compiled into its files. They keep their own licences, which are reproduced in
+full in `dist/THIRD_PARTY_LICENSES.txt` inside the npm package. The build writes that file,
+so it is not in this repository.
 
 Trail was created by Diego Valadares Sá Fortes, working together with
 [IARA](https://iara.app.br). For any use these terms do not allow, ask the author.

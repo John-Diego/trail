@@ -40,12 +40,12 @@
     "access": "public"
   },
   "scripts": {
-    "build": "vite build && esbuild cli=bin/trail.ts main=bin/main.ts server=server/index.ts --bundle --platform=node --format=esm --target=node22 --outdir=dist --log-level=warning && chmod +x dist/cli.js",
+    "build": "vite build && esbuild cli=bin/trail.ts main=bin/main.ts server=server/index.ts --bundle --platform=node --format=esm --target=node22 --outdir=dist --log-level=warning --metafile=node_modules/.cache/trail/esbuild-meta.json && tsx scripts/write-third-party-licenses.ts && chmod +x dist/cli.js",
     "prepack": "npm run build",
     "dev": "TRAIL_DEV_ORIGIN=http://localhost:4478 concurrently -k -n server,web \"tsx watch server/index.ts\" \"vite\"",
     "trail": "tsx bin/trail.ts",
     "typecheck": "tsc --noEmit",
-    "test": "TRAIL_HOME=$(mktemp -d) TRAIL_CONFIG=$(mktemp -d)/config.json NODE_OPTIONS=--disable-warning=ExperimentalWarning tsx --test bin/*.test.ts server/*.test.ts"
+    "test": "TRAIL_HOME=$(mktemp -d) TRAIL_CONFIG=$(mktemp -d)/config.json NODE_OPTIONS=--disable-warning=ExperimentalWarning tsx --test bin/*.test.ts server/*.test.ts scripts/*.test.ts"
   },
   "devDependencies": {
     "@types/dompurify": "^3.0.5",

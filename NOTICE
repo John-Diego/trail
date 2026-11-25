@@ -7,3 +7,11 @@ IARA (https://iara.app.br).
 Trail is licensed under the Apache License, Version 2.0, subject to the Commons
 Clause License Condition v1.0 and the Authorship Condition set out in the
 LICENSE file. It may not be sold, and its origin may not be misrepresented.
+
+Third-party software
+
+The published package also contains code from other projects, compiled into the
+files in dist/. Each of them remains under its own licence and copyright, not
+under the terms above. Their names, versions and full licence texts are in
+dist/THIRD_PARTY_LICENSES.txt. The build writes that file from what it bundles,
+so it is in the published package and not in the source repository.
