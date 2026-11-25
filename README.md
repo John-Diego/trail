@@ -44,7 +44,7 @@ code you do not trust: see [Reviewing code you do not trust](#reviewing-code-you
 ## Install
 
 ```sh
-npm install -g @iara/trail
+npm install -g @mermaid-company/trail
 trail doctor
 ```
 
@@ -239,7 +239,7 @@ owners in one command is refused.
 ## Updating
 
 ```sh
-npm install -g @iara/trail@latest
+npm install -g @mermaid-company/trail@latest
 ```
 
 The next command notices the update and restarts Trail's background server, unless Claude

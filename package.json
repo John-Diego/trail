@@ -1,5 +1,5 @@
 {
-  "name": "@iara/trail",
+  "name": "@mermaid-company/trail",
   "version": "0.1.0",
   "description": "Local pull request review for AI-written code: walkthroughs, move detection, code navigation and Claude Code chat.",
   "keywords": [
