@@ -1,4 +1,5 @@
 // Fetches pull requests to choose from, through the gh command and the reader's own GitHub login.
+import { execFile } from 'node:child_process'
 import type { ListFilters } from './args.ts'
 
 /** One pull request as shown in the list. Fields GitHub's search does not return are left out. */
@@ -158,18 +159,17 @@ export function normalize(items: Json[], target: ListTarget, me: string): PrRow[
   })
 }
 
-async function gh(args: string[]): Promise<string> {
-  let proc: ReturnType<typeof Bun.spawn>
-  try {
-    // gh must fail rather than stop to ask something nobody will see, and must talk to
-    // github.com, which is the only host Trail supports, whatever GH_HOST says.
-    proc = Bun.spawn(['gh', ...args], { stdout: 'pipe', stderr: 'pipe', stdin: 'ignore', env: { ...process.env, GH_PROMPT_DISABLED: '1', GH_HOST: 'github.com' } })
-  } catch {
-    throw new Error('The gh command was not found. Install the GitHub CLI and run `gh auth login`.')
-  }
-  const [out, err, code] = await Promise.all([new Response(proc.stdout as ReadableStream).text(), new Response(proc.stderr as ReadableStream).text(), proc.exited])
-  if (code !== 0) throw new Error(printable(err.trim().split('\n').slice(-3).join(' ')) || `gh ${args[0]} ${args[1]} failed.`)
-  return out
+function gh(args: string[]): Promise<string> {
+  // gh must fail rather than stop to ask something nobody will see, and must talk to
+  // github.com, which is the only host Trail supports, whatever GH_HOST says.
+  const env = { ...process.env, GH_PROMPT_DISABLED: '1', GH_HOST: 'github.com' }
+  return new Promise((resolve, reject) => {
+    execFile('gh', args, { env, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024, timeout: 120_000 }, (err, stdout, stderr) => {
+      if (!err) return resolve(stdout)
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return reject(new Error('The gh command was not found. Install the GitHub CLI and run `gh auth login`.'))
+      reject(new Error(printable(stderr.trim().split('\n').slice(-3).join(' ')) || `gh ${args[0]} ${args[1]} failed.`))
+    })
+  })
 }
 
 export async function fetchList(target: ListTarget): Promise<{ rows: PrRow[]; me: string }> {

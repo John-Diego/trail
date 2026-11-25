@@ -10,6 +10,11 @@ function conflict(message: string): Error {
   return Object.assign(new Error(message), { status: 409 })
 }
 
+/** Whether any Claude run or checkout move is in progress anywhere. */
+export function anythingInProgress(): boolean {
+  return running.size > 0 || moving.size > 0
+}
+
 export function isRunning(dir: string): boolean {
   return running.has(dir)
 }

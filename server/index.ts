@@ -7,8 +7,8 @@ import { db, getSetting, setSetting } from './db.ts'
 import { git, run, showFile, TRAIL_HOME } from './git.ts'
 import { DIFF_FLAGS, ignoreAttributes } from './diff.ts'
 import { getReview, importReview, isTrailCheckout, listComments, listReviews, loadRow, refreshReview, type ImportRequest } from './importer.ts'
-import { isRunning, withRun } from './locks.ts'
-import { buildId, trailPort } from '../shared/settings.ts'
+import { anythingInProgress, isRunning, withRun } from './locks.ts'
+import { buildId, ROOT, trailPort } from '../shared/settings.ts'
 import { knownIdentifiers, lookupSymbol } from './symbols.ts'
 import { generateWalkthrough } from './walkthrough.ts'
 
@@ -16,7 +16,7 @@ const PORT = trailPort()
 // What the launcher compares against to notice a server left running from before an update.
 const BUILD = buildId()
 const HOST = '127.0.0.1'
-const builtWeb = path.resolve(import.meta.dir, '../dist/web')
+const builtWeb = path.join(ROOT, 'dist', 'web')
 const WEB_DIR = fs.existsSync(path.join(builtWeb, 'index.html')) ? builtWeb : undefined
 
 type Req = http.IncomingMessage
@@ -81,7 +81,10 @@ function eventStream(req: Req, res: Res): { emit: (e: StreamEvent) => void; sign
 // Imports can take a while (first clone of a repository), so they run as pollable jobs.
 interface Job {
   status: 'running' | 'done' | 'error'
+  /** The stage the import is in, or the reason it failed. */
   message: string
+  /** How far along the stage is, when that is known. */
+  detail?: string
   reviewId?: number
 }
 const jobs = new Map<number, Job>()
@@ -93,7 +96,7 @@ let queue: Promise<unknown> = Promise.resolve()
  * Imports and refreshes run one at a time: they fetch into shared clones and move checkouts,
  * which must not happen concurrently. Asking for work that is already queued returns that job.
  */
-function startJob(key: string, work: (progress: (m: string) => void) => Promise<number>): number {
+function startJob(key: string, work: (progress: (message: string, detail?: string) => void) => Promise<number>): number {
   const existing = jobByKey.get(key)
   if (existing !== undefined) return existing
   const id = nextJob++
@@ -101,10 +104,10 @@ function startJob(key: string, work: (progress: (m: string) => void) => Promise<
   jobs.set(id, job)
   jobByKey.set(key, id)
   queue = queue
-    .then(() => work((m) => (job.message = m)))
+    .then(() => work((message, detail) => Object.assign(job, { message, detail })))
     .then(
-      (reviewId) => Object.assign(job, { status: 'done', reviewId, message: 'Done' }),
-      (err: Error) => Object.assign(job, { status: 'error', message: err.message }),
+      (reviewId) => Object.assign(job, { status: 'done', reviewId, message: 'Done', detail: undefined }),
+      (err: Error) => Object.assign(job, { status: 'error', message: err.message, detail: undefined }),
     )
     .finally(() => {
       jobByKey.delete(key)
@@ -156,7 +159,9 @@ async function api(req: Req, res: Res, url: URL): Promise<void> {
   const method = req.method ?? 'GET'
 
   // The pid lets `trail stop` signal the process that is really serving this port.
-  if (seg[0] === 'health') return send(res, 200, { ok: true, app: 'trail', pid: process.pid, build: BUILD })
+  // "home" lets the launcher tell its own server from one serving another data folder, and
+  // "busy" whether restarting now (after an update) would interrupt work.
+  if (seg[0] === 'health') return send(res, 200, { ok: true, app: 'trail', pid: process.pid, build: BUILD, home: TRAIL_HOME, busy: anythingInProgress() || jobByKey.size > 0 })
   if (seg[0] === 'settings') {
     if (method === 'PUT') {
       const body = await readJson<Partial<Settings>>(req)
@@ -259,6 +264,8 @@ async function api(req: Req, res: Res, url: URL): Promise<void> {
     if (method === 'POST') {
       const b = await readJson<{ path: string; side: string; line: number; inDiff: boolean; body: string; text?: string }>(req)
       if (!b.body?.trim()) throw new HttpError(400, 'A note needs some text.')
+      // Checked here because the database refuses a missing value outright, which would read as a server error.
+      if (typeof b.path !== 'string' || (b.side !== 'old' && b.side !== 'new') || !Number.isInteger(b.line)) throw new HttpError(400, 'A note needs a file, a side and a line.')
       db.prepare('INSERT INTO comments (review_id, path, side, line, in_diff, body, line_text, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(
         id, b.path, b.side, b.line, b.inDiff ? 1 : 0, b.body.trim(), typeof b.text === 'string' ? b.text : null, Date.now(),
       )
@@ -362,7 +369,7 @@ const MIME: Record<string, string> = { '.html': 'text/html; charset=utf-8', '.js
 function serveStatic(res: Res, url: URL): void {
   if (!WEB_DIR) {
     res.writeHead(503, { 'Content-Type': 'text/plain' })
-    return void res.end('The web UI has not been built. Run `bun run build`, or use `bun run dev` and open http://localhost:4478.')
+    return void res.end('The web UI has not been built. Run `npm run build`, or use `npm run dev` and open http://localhost:4478.')
   }
   let decoded: string
   try {
@@ -416,7 +423,7 @@ const server = http.createServer(async (req, res) => {
 })
 
 server.on('error', (err: NodeJS.ErrnoException) => {
-  console.error(err.code === 'EADDRINUSE' ? `Port ${PORT} is already in use. Is Trail already running? Set TRAIL_PORT to use another port.` : err.message)
+  console.error(err.code === 'EADDRINUSE' ? `Port ${PORT} is already in use. Is Trail already running? Choose another port with "trail config port <number>".` : err.message)
   process.exit(1)
 })
 

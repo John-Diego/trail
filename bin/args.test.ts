@@ -1,15 +1,15 @@
-import { test } from 'bun:test'
+import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import path from 'node:path'
 import os from 'node:os'
 import { isAddress, parsePrRef, parseRepoRef } from '../shared/pr-ref.ts'
-import { ROOT, trailHome, trailPort } from '../shared/settings.ts'
-import { parseArgs, parseEnvFile, resolveTarget, type ListFilters } from './args.ts'
+import fs from 'node:fs'
+import { configFile, configProblem, readConfig, setting, trailHome, trailPort, writeConfig } from '../shared/settings.ts'
+import { parseArgs, resolveTarget, type ListFilters } from './args.ts'
 import { describeList, ghListArgs, normalize, printable, type PrRow } from './list.ts'
 import { age, fit, incomplete, layout, line, matches, narrowed, parseKeys, reduce, render, scopesFor, status, visibleTop, width, type PickerState } from './picker.ts'
 
-const ENV = '/trail/.env'
-const target = (argv: string[], owner?: string) => resolveTarget(parseArgs(argv), owner, ENV)
+const target = (argv: string[], owner?: string) => resolveTarget(parseArgs(argv), owner)
 
 test('repo and number use the owner from the settings file', () => {
   assert.deepEqual(target(['api', '123'], 'acme'), { kind: 'pr', ref: 'acme/api#123' })
@@ -32,7 +32,7 @@ test('an owner written with the repository wins over the settings file; a confli
 })
 
 test('a missing owner is explained, with where to set it', () => {
-  assert.throws(() => target(['api', '123']), /No owner for "api".*\/trail\/\.env.*--owner/s)
+  assert.throws(() => target(['api', '123']), /No owner for "api".*trail config owner.*--owner/s)
 })
 
 test('URLs, local paths and commands still work', () => {
@@ -57,18 +57,6 @@ test('mistakes are reported instead of guessed at', () => {
   assert.throws(() => parseArgs(['api', '1', '--owner']), /--owner needs a value/)
   assert.throws(() => parseArgs(['api', '1', '--owner', '--no-open']), /--owner needs a value/)
   assert.throws(() => parseArgs(['--ownr', 'x']), /Unknown option --ownr/)
-})
-
-test('the settings file gives only TRAIL_ values, and blank means unset', () => {
-  const text = `# comment
-TRAIL_OWNER=acme   # the organisation
-export TRAIL_PORT="5000"
-TRAIL_HOME='/data/trail dir'
-TRAIL_EMPTY=
-ANTHROPIC_API_KEY=sk-should-never-be-read
-  GITHUB_TOKEN = nope
-`
-  assert.deepEqual(parseEnvFile(text), { TRAIL_OWNER: 'acme', TRAIL_PORT: '5000', TRAIL_HOME: '/data/trail dir' })
 })
 
 test('owner/repo/number in one word', () => {
@@ -120,14 +108,6 @@ test('the shared parser also reads the two-word form, for the box on the home pa
   assert.equal(parsePrRef('./api 123'), null)
 })
 
-test('a .env saved on Windows, and comments in awkward places, are still read correctly', () => {
-  assert.deepEqual(parseEnvFile('TRAIL_OWNER=acme\r\nTRAIL_PORT=5000\r\n'), { TRAIL_OWNER: 'acme', TRAIL_PORT: '5000' })
-  assert.deepEqual(parseEnvFile('TRAIL_OWNER=   # set me\nTRAIL_PORT= #nothing'), {})
-  assert.deepEqual(parseEnvFile('TRAIL_OWNER="acme" # the "main" org'), { TRAIL_OWNER: 'acme' })
-  assert.deepEqual(parseEnvFile("TRAIL_HOME='/data/a#b'"), { TRAIL_HOME: '/data/a#b' })
-  assert.deepEqual(parseEnvFile('TRAIL_HOME=/data/a#b'), { TRAIL_HOME: '/data/a#b' })
-})
-
 test('pull request numbers are bounded', () => {
   assert.equal(parsePrRef('api#0'), null)
   assert.equal(parsePrRef('acme/api/' + '9'.repeat(10)), null)
@@ -152,7 +132,7 @@ test('addresses on other hosts are refused clearly, not treated as folders', () 
 
 test('a word that is both a folder here and a pull request reference is not guessed at', () => {
   const onDisk = (p: string) => ['src/lib/2024', 'notes#1'].includes(p)
-  const resolve = (argv: string[]) => resolveTarget(parseArgs(argv), 'acme', ENV, onDisk)
+  const resolve = (argv: string[]) => resolveTarget(parseArgs(argv), 'acme', onDisk)
   assert.throws(() => resolve(['src/lib/2024']), /is a file or folder here and also reads as a pull request.*\.\/src\/lib\/2024.*"src\/lib 2024"/s)
   assert.throws(() => resolve(['notes#1']), /is a file or folder here/)
   assert.deepEqual(resolve(['./src/lib/2024']).kind, 'local')
@@ -174,16 +154,16 @@ test('the data folder and port settings', () => {
   try {
     process.env.TRAIL_HOME = '~/somewhere'
     assert.equal(trailHome(), path.join(os.homedir(), 'somewhere'))
-    // A relative folder is taken from Trail's own folder, never from the folder a command runs in.
+    // A relative folder is taken from the home folder, never from the folder a command runs in.
     process.env.TRAIL_HOME = 'data'
-    assert.equal(trailHome(), path.join(ROOT, 'data'))
+    assert.equal(trailHome(), path.join(os.homedir(), 'data'))
     process.env.TRAIL_HOME = '/abs/trail'
     assert.equal(trailHome(), '/abs/trail')
     process.env.TRAIL_PORT = '5000'
     assert.equal(trailPort(), 5000)
     for (const bad of ['4477# x', 'abc', '0', '70000']) {
       process.env.TRAIL_PORT = bad
-      assert.throws(() => trailPort(), /TRAIL_PORT must be a port number/, bad)
+      assert.throws(() => trailPort(), /port must be a number from 1 to 65535/, bad)
     }
   } finally {
     for (const [key, value] of [['TRAIL_HOME', saved.home], ['TRAIL_PORT', saved.port]] as const) {
@@ -226,7 +206,7 @@ test('--list and the filters', () => {
 
 test('a name that is both a folder here and a repository is not guessed at', () => {
   const onDisk = (p: string) => ['web', 'packages/app'].includes(p)
-  const resolve = (argv: string[], owner?: string) => resolveTarget(parseArgs(argv), owner, ENV, onDisk)
+  const resolve = (argv: string[], owner?: string) => resolveTarget(parseArgs(argv), owner, onDisk)
   assert.throws(() => resolve(['web'], 'acme'), /is a file or folder here and also reads as the GitHub repository acme\/web.*\.\/web.*--list/s)
   assert.throws(() => resolve(['packages/app']), /also reads as the GitHub repository packages\/app/)
   // --list settles it one way, ./ the other.
@@ -399,7 +379,7 @@ test('names that could be a command, a number or a path are not guessed at', () 
   assert.throws(() => target(['serve', '--list'], 'acme'), /does nothing with "trail serve".*owner\/serve/)
   assert.throws(() => target(['stop', '--mine'], 'acme'), /does nothing with "trail stop"/)
   const onDisk = (p: string) => ['bin', 'web', 'README.md'].includes(p)
-  const resolve = (argv: string[], owner?: string) => resolveTarget(parseArgs(argv), owner, ENV, onDisk)
+  const resolve = (argv: string[], owner?: string) => resolveTarget(parseArgs(argv), owner, onDisk)
   // "bin/x" does not exist, but "bin" does: it is more likely a mistyped path than a repository.
   assert.throws(() => resolve(['bin/x']), /is a file or folder here and also reads as the GitHub repository bin\/x/)
   assert.throws(() => resolve(['README.md'], 'acme'), /is a file or folder here/)
@@ -443,4 +423,87 @@ test('pasted text is text, and a split arrow key is not Escape', () => {
   assert.equal(incomplete('\x1b[200~half a paste'), true)
   assert.equal(incomplete('\x1b[A'), false)
   assert.equal(incomplete('abc'), false)
+})
+
+test('the config and doctor commands', () => {
+  assert.deepEqual(target(['config']), { kind: 'config', key: undefined, value: undefined, unset: false })
+  assert.deepEqual(target(['config', 'owner']), { kind: 'config', key: 'owner', value: undefined, unset: false })
+  assert.deepEqual(target(['config', 'owner', 'acme']), { kind: 'config', key: 'owner', value: 'acme', unset: false })
+  assert.deepEqual(target(['config', 'port', '5000']), { kind: 'config', key: 'port', value: '5000', unset: false })
+  assert.deepEqual(target(['config', 'owner', '--unset']), { kind: 'config', key: 'owner', value: undefined, unset: true })
+  assert.deepEqual(target(['doctor']), { kind: 'doctor' })
+  assert.throws(() => target(['config', 'owner', 'a', 'b']), /Too many arguments/)
+  assert.throws(() => target(['config', '--unset']), /--unset with one setting/)
+  assert.throws(() => target(['config', 'owner', 'acme', '--unset']), /--unset with one setting/)
+  assert.throws(() => target(['acme/api', '--unset']), /--unset only applies/)
+  assert.throws(() => target(['doctor', 'now']), /takes no arguments/)
+  assert.throws(() => target(['config', '--list']), /does nothing with "trail config"/)
+  // A repository that happens to be called "config" or "doctor" is still reachable by number.
+  assert.deepEqual(target(['config', '12'], 'acme'), { kind: 'pr', ref: 'acme/config#12' })
+  assert.deepEqual(target(['acme/doctor']), { kind: 'list', repo: 'acme/doctor', filters: OPEN })
+})
+
+test('saved settings: written, read back, validated, and overridden by the environment', () => {
+  const saved = { config: process.env.TRAIL_CONFIG, owner: process.env.TRAIL_OWNER, port: process.env.TRAIL_PORT }
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'trail-config-'))
+  try {
+    process.env.TRAIL_CONFIG = path.join(dir, 'nested', 'config.json')
+    delete process.env.TRAIL_OWNER
+    delete process.env.TRAIL_PORT
+    assert.deepEqual(readConfig(), {})
+    writeConfig('owner', 'acme')
+    writeConfig('port', '5000')
+    assert.deepEqual(readConfig(), { owner: 'acme', port: '5000' })
+    assert.equal(configFile(), process.env.TRAIL_CONFIG)
+
+    assert.throws(() => writeConfig('owner', '../x'), /not a GitHub user or organisation/)
+    assert.throws(() => writeConfig('port', '70000'), /not a port number/)
+    assert.equal(configProblem('home', '~/elsewhere'), null)
+    assert.deepEqual(readConfig(), { owner: 'acme', port: '5000' })
+
+    // The environment wins over what is saved, and a saved value is seen as soon as it changes.
+    process.env.TRAIL_PORT = '6000'
+    assert.deepEqual([setting('owner'), setting('port'), trailPort()], ['acme', '6000', 6000])
+    delete process.env.TRAIL_PORT
+    assert.equal(trailPort(), 5000)
+    writeConfig('home', '~/elsewhere')
+    assert.equal(readConfig().home, path.join(os.homedir(), 'elsewhere'))
+    writeConfig('home', undefined)
+
+    writeConfig('owner', undefined)
+    assert.deepEqual(readConfig(), { port: '5000' })
+
+    // Only known settings are read, whatever else the file contains; a broken file says so.
+    fs.writeFileSync(process.env.TRAIL_CONFIG, JSON.stringify({ owner: 'acme', token: 'secret', port: 5000, home: '  ' }))
+    assert.deepEqual(readConfig(), { owner: 'acme', port: '5000' })
+    fs.writeFileSync(process.env.TRAIL_CONFIG, '["an", "array"]')
+    assert.deepEqual(readConfig(), {})
+    fs.writeFileSync(process.env.TRAIL_CONFIG, '{ not json')
+    assert.throws(() => readConfig(), /is not valid JSON/)
+    // A file that exists but cannot be read is reported, not treated as "nothing saved".
+    process.env.TRAIL_CONFIG = dir
+    assert.throws(() => readConfig(), /Could not read/)
+    // With only TRAIL_HOME set, the settings live in that folder too.
+    delete process.env.TRAIL_CONFIG
+    const savedHome = process.env.TRAIL_HOME
+    process.env.TRAIL_HOME = path.join(dir, 'profile')
+    assert.equal(configFile(), path.join(dir, 'profile', 'config.json'))
+    if (savedHome === undefined) delete process.env.TRAIL_HOME
+    else process.env.TRAIL_HOME = savedHome
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true })
+    for (const [key, value] of [['TRAIL_CONFIG', saved.config], ['TRAIL_OWNER', saved.owner], ['TRAIL_PORT', saved.port]] as const) {
+      if (value === undefined) delete process.env[key]
+      else process.env[key] = value
+    }
+  }
+})
+
+test('repo/number is a pull request of the saved owner', () => {
+  assert.deepEqual(target(['api/123'], 'acme'), { kind: 'pr', ref: 'acme/api#123' })
+  assert.deepEqual(target(['api/123', '--owner', 'other']), { kind: 'pr', ref: 'other/api#123' })
+  assert.throws(() => target(['api/123']), /No owner for "api"/)
+  // A repository whose name is a number is still reachable: by asking for its list, or by address.
+  assert.deepEqual(target(['gabrielecirulli/2048', '--list']), { kind: 'list', repo: 'gabrielecirulli/2048', filters: OPEN })
+  assert.deepEqual(target(['github.com/gabrielecirulli/2048']), { kind: 'list', repo: 'gabrielecirulli/2048', filters: OPEN })
 })

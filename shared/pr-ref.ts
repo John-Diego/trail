@@ -25,6 +25,9 @@ const FORMS: RegExp[] = [
   new RegExp(`^([^/\\s#]+)\\/([^/\\s#]+)(?:#|\\s+#?)${N}$`),
   // repo#123 and repo 123, owner to be filled in
   new RegExp(`^()([^/\\s#]+)(?:#|\\s+#?)${N}$`),
+  // repo/123, owner to be filled in. Read this way because a number is far more often a pull
+  // request than the name of a repository; --list asks for the other reading.
+  new RegExp(`^()([^/\\s#]+)\\/${N}$`),
 ]
 
 /** Whether the text could be the name of a GitHub user, organisation or repository. Also keeps names from being read as command options or as "." and "..". */

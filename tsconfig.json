@@ -11,7 +11,7 @@
     "resolveJsonModule": true,
     "allowImportingTsExtensions": true,
     "lib": ["ES2023", "DOM", "DOM.Iterable"],
-    "types": ["bun"]
+    "types": ["node"]
   },
   "include": ["server", "web/src", "shared", "bin", "vite.config.ts"]
 }

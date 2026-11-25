@@ -37,6 +37,7 @@ async function stream(path: string, body: unknown, onEvent: (e: StreamEvent) => 
 interface Job {
   status: 'running' | 'done' | 'error'
   message: string
+  detail?: string
   reviewId?: number
 }
 
@@ -45,7 +46,7 @@ async function waitForJob(jobId: number, onProgress: (m: string) => void): Promi
     const job = await request<Job>('GET', `/jobs/${jobId}`)
     if (job.status === 'done') return job.reviewId!
     if (job.status === 'error') throw new Error(job.message)
-    onProgress(job.message)
+    onProgress(job.detail ? `${job.message}: ${job.detail}` : job.message)
     await new Promise((r) => setTimeout(r, 400))
   }
 }

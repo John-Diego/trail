@@ -6,12 +6,14 @@ import { isAddress, isGithubAddress, isValidName, parsePrRef, PR_FORMS_HELP } fr
 import type { Comment, FileDiff, Move, Review, ReviewSummary, Walkthrough } from '../shared/types.ts'
 import { db, tx } from './db.ts'
 import { loadDiff } from './diff.ts'
-import { git, gitOk, LONG, run, TRAIL_HOME } from './git.ts'
+import { git, gitOk, LONG, run, runTransfer, TRAIL_HOME } from './git.ts'
 import { withMove } from './locks.ts'
+import { setting } from '../shared/settings.ts'
 import { detectMoves } from './moves.ts'
 import { annotateHunks, indexSymbols } from './symbols.ts'
 
-type Progress = (message: string) => void
+/** `message` is the stage, in words. `detail` is how far along it is, when that is known. */
+type Progress = (message: string, detail?: string) => void
 
 interface Source {
   kind: 'pr' | 'local'
@@ -40,13 +42,14 @@ async function resolvePr(ref: string, progress: Progress): Promise<Source> {
     if (isAddress(ref)) throw new Error('Trail reads pull requests from github.com only.')
     throw new Error(`Could not read "${ref.trim()}" as a pull request. Use ${PR_FORMS_HELP}.`)
   }
-  const typedOwner = parsed.owner ?? process.env.TRAIL_OWNER
-  if (!typedOwner) throw new Error(`No owner for "${parsed.repo}". Write it as owner/${parsed.repo}/${parsed.number}, or set TRAIL_OWNER in Trail's .env.`)
+  // Read now, not when the server started: the owner may have been saved or changed since.
+  const typedOwner = parsed.owner ?? setting('owner')
+  if (!typedOwner) throw new Error(`No owner for "${parsed.repo}". Write it as owner/${parsed.repo}/${parsed.number}, or save a default with "trail config owner <name>".`)
   // The owner becomes a command argument and part of folder names, wherever it came from.
-  if (!isValidName(typedOwner)) throw new Error(`"${typedOwner}" is not a valid owner name. Check TRAIL_OWNER in Trail's .env.`)
+  if (!isValidName(typedOwner)) throw new Error(`"${typedOwner}" is not a valid owner name. Check it with "trail config".`)
   progress(`Reading ${typedOwner}/${parsed.repo}#${parsed.number} from GitHub`)
   const meta = JSON.parse(
-    await run('gh', ['pr', 'view', String(parsed.number), '-R', `${typedOwner}/${parsed.repo}`, '--json', 'number,title,body,author,baseRefName,headRefName,url,isCrossRepository,maintainerCanModify']),
+    await run('gh', ['pr', 'view', String(parsed.number), '-R', `${typedOwner}/${parsed.repo}`, '--json', 'number,title,body,author,baseRefName,baseRefOid,headRefName,url,isCrossRepository,maintainerCanModify']),
   )
   // GitHub ignores case in names, so "Acme/API" and "acme/api" are one repository. The spelling
   // GitHub itself reports is used from here on, so they are also one review and one clone.
@@ -56,16 +59,37 @@ async function resolvePr(ref: string, progress: Progress): Promise<Source> {
 
   const repoDir = path.join(TRAIL_HOME, 'repos', pr.owner, `${pr.repo}.git`)
   if (!fs.existsSync(repoDir)) {
-    progress(`Cloning ${slug} (first time only)`)
+    const cloning = `Cloning ${slug} (first time only)`
+    progress(cloning)
     fs.mkdirSync(path.dirname(repoDir), { recursive: true })
-    await run('gh', ['repo', 'clone', slug, repoDir, '--', '--bare'], { timeoutMs: LONG })
+    // Cloned beside its final place and moved there when complete, so that a clone cut short
+    // (a dropped connection, a restart) is started again instead of being taken for a whole one.
+    const partial = `${repoDir}.partial`
+    fs.rmSync(partial, { recursive: true, force: true })
+    try {
+      await runTransfer('gh', ['repo', 'clone', slug, partial, '--', '--bare', '--progress'], { label: 'gh repo clone', onProgress: (p) => progress(cloning, p) })
+      fs.renameSync(partial, repoDir)
+    } catch (err) {
+      fs.rmSync(partial, { recursive: true, force: true })
+      throw err
+    }
   }
   progress('Fetching the pull request')
   const headRefLocal = `refs/trail/pr-${pr.number}`
   const baseRefLocal = `refs/trail/base-${pr.number}`
-  await git(repoDir, ['fetch', '--force', 'origin', `+refs/pull/${pr.number}/head:${headRefLocal}`, `+refs/heads/${meta.baseRefName}:${baseRefLocal}`], { timeoutMs: LONG })
+  await runTransfer('git', ['-c', 'core.fsmonitor=', '-c', 'core.hooksPath=/dev/null', 'fetch', '--force', '--progress', 'origin', `+refs/pull/${pr.number}/head:${headRefLocal}`, `+refs/heads/${meta.baseRefName}:${baseRefLocal}`], {
+    cwd: repoDir,
+    label: 'git fetch',
+    onProgress: (p) => progress('Fetching the pull request', p),
+  })
   const headSha = (await git(repoDir, ['rev-parse', headRefLocal])).trim()
-  const baseSha = (await git(repoDir, ['merge-base', headRefLocal, baseRefLocal])).trim()
+  let baseSha = (await git(repoDir, ['merge-base', headRefLocal, baseRefLocal])).trim()
+  // Once a pull request is merged, its commits are part of the base branch, so the branch as it
+  // is now has nothing the pull request lacks. GitHub records where the base branch stood for
+  // the pull request; measured from there, the change is what was reviewed and merged.
+  if (baseSha === headSha && /^[0-9a-f]{40,64}$/.test(String(meta.baseRefOid ?? ''))) {
+    baseSha = (await git(repoDir, ['merge-base', headRefLocal, meta.baseRefOid]).catch(() => baseSha)).trim()
+  }
 
   // A separate checkout of the head, so Claude and code search see the whole repository as the author left it.
   const workDir = path.join(TRAIL_HOME, 'worktrees', pr.owner, pr.repo, String(pr.number))

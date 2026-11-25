@@ -1,8 +1,14 @@
-import { Database } from 'bun:sqlite'
+import { DatabaseSync } from 'node:sqlite'
 import path from 'node:path'
 import { TRAIL_HOME } from './git.ts'
 
-export const db = new Database(path.join(TRAIL_HOME, 'trail.db'))
+export const db = new DatabaseSync(path.join(TRAIL_HOME, 'trail.db'))
+
+// The layout of the database is numbered, so that a later Trail can upgrade an older file, and
+// an older Trail refuses a newer one, before changing anything in it, instead of misreading it.
+const SCHEMA_VERSION = 1
+const found = Number((db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version)
+if (found > SCHEMA_VERSION) throw new Error(`The data in ${TRAIL_HOME} was written by a newer version of Trail. Update Trail, or use another folder with "trail config home <folder>".`)
 
 db.exec(`
 PRAGMA journal_mode = WAL;
@@ -94,6 +100,8 @@ CREATE TABLE IF NOT EXISTS settings (
   value TEXT NOT NULL
 );
 `)
+
+if (found < SCHEMA_VERSION) db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`)
 
 export function tx<T>(fn: () => T): T {
   db.exec('BEGIN')

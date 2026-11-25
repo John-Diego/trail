@@ -2,15 +2,13 @@
 import path from 'node:path'
 import { isAddress, isGithubAddress, isValidName, parsePrRef, parseRepoRef } from '../shared/pr-ref.ts'
 
-export { parseEnvFile } from '../shared/settings.ts'
-
 const VALUE_FLAGS = ['base', 'owner', 'author', 'reviewer', 'label', 'state', 'search', 'limit'] as const
-const SWITCHES = { '--no-open': 'noOpen', '--list': 'list', '--mine': 'mine', '--for-me': 'forMe', '--help': 'help', '-h': 'help' } as const
+const SWITCHES = { '--no-open': 'noOpen', '--list': 'list', '--mine': 'mine', '--for-me': 'forMe', '--unset': 'unset', '--help': 'help', '-h': 'help' } as const
 type ValueFlag = (typeof VALUE_FLAGS)[number]
 /** Options that narrow a list of pull requests. Giving any of them asks for a list. */
 const FILTER_FLAGS = ['author', 'reviewer', 'label', 'state', 'search', 'limit'] as const
 
-export type Args = { positional: string[]; noOpen: boolean; list: boolean; mine: boolean; forMe: boolean; help: boolean } & Partial<Record<ValueFlag, string>>
+export type Args = { positional: string[]; noOpen: boolean; list: boolean; mine: boolean; forMe: boolean; unset: boolean; help: boolean } & Partial<Record<ValueFlag, string>>
 
 export type PrState = 'open' | 'closed' | 'merged' | 'all'
 
@@ -30,13 +28,17 @@ export type Target =
   | { kind: 'home' }
   | { kind: 'serve' }
   | { kind: 'stop' }
+  /** Check that everything Trail depends on is installed and logged in. */
+  | { kind: 'doctor' }
+  /** Show the saved settings, show one, set one, or (unset) remove one. */
+  | { kind: 'config'; key?: string; value?: string; unset: boolean }
   | { kind: 'pr'; ref: string }
   | { kind: 'local'; path: string; base?: string }
   /** Pull requests to choose from: of one repository, or (without one) across an owner or all of GitHub. */
   | { kind: 'list'; repo?: string; owner?: string; filters: ListFilters }
 
 export function parseArgs(argv: string[]): Args {
-  const args: Args = { positional: [], noOpen: false, list: false, mine: false, forMe: false, help: false }
+  const args: Args = { positional: [], noOpen: false, list: false, mine: false, forMe: false, unset: false, help: false }
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]
     if (a in SWITCHES) args[SWITCHES[a as keyof typeof SWITCHES]] = true
@@ -109,10 +111,25 @@ function pickOwner(written: string | undefined, args: Args, defaultOwner: string
  * `exists` says whether a relative path is a real file or folder. A word that is both a
  * GitHub reference and something on disk is refused rather than guessed at.
  */
-export function resolveTarget(args: Args, defaultOwner: string | undefined, envFile: string, exists: (p: string) => boolean = () => false): Target {
+export function resolveTarget(args: Args, defaultOwner: string | undefined, exists: (p: string) => boolean = () => false): Target {
+  const ownerHint = 'Save one with "trail config owner <name>"'
   const [first, second, ...extra] = args.positional
-  if (extra.length) throw new Error('Too many arguments. Run trail --help for usage.')
   const listing = wantsList(args)
+
+  // Commands with words of their own. A number after one means a repository of that name instead.
+  if ((first === 'config' || first === 'doctor') && !/^#?\d+$/.test(second ?? '')) {
+    refuseListOptions(args, `does nothing with "trail ${first}".`)
+    refuse(args, ['base', 'owner'], `does nothing with "trail ${first}".`)
+    if (first === 'doctor') {
+      if (second !== undefined || args.unset) throw new Error('"trail doctor" takes no arguments.')
+      return { kind: 'doctor' }
+    }
+    if (extra.length > 1) throw new Error('Too many arguments. Use: trail config [name] [value].')
+    if (args.unset && (second === undefined || extra.length)) throw new Error('Use --unset with one setting and no value: trail config owner --unset.')
+    return { kind: 'config', key: second, value: extra[0], unset: args.unset }
+  }
+  if (args.unset) throw new Error('--unset only applies to "trail config <name>".')
+  if (extra.length) throw new Error('Too many arguments. Run trail --help for usage.')
 
   if (first === undefined) {
     refuse(args, ['base'], 'needs a local repository to review. Run trail --help for usage.')
@@ -138,7 +155,10 @@ export function resolveTarget(args: Args, defaultOwner: string | undefined, envF
     return { kind: 'local', path: path.resolve(first), base: args.base }
   }
 
-  const pr = parsePrRef(second === undefined ? first : `${first} ${second}`)
+  // "name/123" is pull request 123 of the repository "name", unless a list was asked for:
+  // then it is the repository called "123" of the owner "name".
+  const repoNamedByNumber = second === undefined && listing && /^[^/\s#]+\/\d+$/.test(first)
+  const pr = repoNamedByNumber ? null : parsePrRef(second === undefined ? first : `${first} ${second}`)
   if (pr) {
     refuseListOptions(args, 'is for choosing from a list, but this names one pull request. Leave out the number to list.')
     if (second === undefined && exists(first)) {
@@ -146,7 +166,7 @@ export function resolveTarget(args: Args, defaultOwner: string | undefined, envF
     }
     refuse(args, ['base'], 'only applies to a local repository; a pull request already has a base branch.')
     const owner = pickOwner(pr.owner, args, defaultOwner)
-    if (!owner) throw new Error(`No owner for "${pr.repo}". Set TRAIL_OWNER in ${envFile}, or pass --owner <name>.`)
+    if (!owner) throw new Error(`No owner for "${pr.repo}". ${ownerHint}, or pass --owner <name>.`)
     return { kind: 'pr', ref: `${owner}/${pr.repo}#${pr.number}` }
   }
   if (second !== undefined) throw new Error(`"${first}" is not a repository name. Use repo or owner/repo before the number.`)
@@ -162,7 +182,7 @@ export function resolveTarget(args: Args, defaultOwner: string | undefined, envF
     if (!owner) {
       // Without an owner a bare word cannot be looked up on GitHub, so a folder of that name is simply the folder.
       if (onDisk && !listing) return { kind: 'local', path: path.resolve(first), base: args.base }
-      throw new Error(`"${first}" ${onDisk ? 'needs an owner to be listed' : 'is not a folder here, and has no owner to look it up under on GitHub'}. Set TRAIL_OWNER in ${envFile}, pass --owner <name>, or write owner/${repo.repo}.`)
+      throw new Error(`"${first}" ${onDisk ? 'needs an owner to be listed' : 'is not a folder here, and has no owner to look it up under on GitHub'}. ${ownerHint}, pass --owner <name>, or write owner/${repo.repo}.`)
     }
     if (onDisk && !listing) throw new Error(`"${first}" is a file or folder here and also reads as the GitHub repository ${owner}/${repo.repo}. Write ./${first} for the one on disk, or add --list for the repository's pull requests.`)
     refuse(args, ['base'], 'only applies to a local repository.')

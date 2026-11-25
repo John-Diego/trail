@@ -1,44 +1,69 @@
 {
-  "name": "trail-review",
+  "name": "@iara/trail",
   "version": "0.1.0",
   "description": "Local pull request review for AI-written code: walkthroughs, move detection, code navigation and Claude Code chat.",
+  "keywords": [
+    "code-review",
+    "pull-request",
+    "github",
+    "claude",
+    "ai",
+    "cli"
+  ],
   "license": "SEE LICENSE IN LICENSE",
   "author": "Diego Valadares Sá Fortes",
   "contributors": [
     "IARA (https://iara.app.br)"
   ],
+  "homepage": "https://github.com/John-Diego/trail#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/John-Diego/trail.git"
+  },
+  "bugs": {
+    "url": "https://github.com/John-Diego/trail/issues"
+  },
   "type": "module",
-  "private": true,
   "bin": {
-    "trail": "bin/trail.ts"
+    "trail": "dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "NOTICE"
+  ],
+  "engines": {
+    "node": ">=22.13"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "scripts": {
-    "dev": "TRAIL_DEV_ORIGIN=http://localhost:4478 concurrently -k -n server,web \"bun --no-env-file --config=/dev/null --watch server/index.ts\" \"bun --bun vite\"",
-    "build": "bun --bun vite build",
-    "trail": "bun --no-env-file --config=/dev/null bin/trail.ts",
-    "serve": "bun --no-env-file --config=/dev/null bin/trail.ts serve",
+    "build": "vite build && esbuild cli=bin/trail.ts main=bin/main.ts server=server/index.ts --bundle --platform=node --format=esm --target=node22 --outdir=dist --log-level=warning && chmod +x dist/cli.js",
+    "prepack": "npm run build",
+    "dev": "TRAIL_DEV_ORIGIN=http://localhost:4478 concurrently -k -n server,web \"tsx watch server/index.ts\" \"vite\"",
+    "trail": "tsx bin/trail.ts",
     "typecheck": "tsc --noEmit",
-    "test": "TRAIL_HOME=$(mktemp -d) bun test"
-  },
-  "dependencies": {
-    "dompurify": "^3.5.0",
-    "highlight.js": "^11.12.0",
-    "marked": "^18.3.0",
-    "react": "^19.3.1",
-    "react-dom": "^19.3.1",
-    "zustand": "^5.1.0"
+    "test": "TRAIL_HOME=$(mktemp -d) TRAIL_CONFIG=$(mktemp -d)/config.json NODE_OPTIONS=--disable-warning=ExperimentalWarning tsx --test bin/*.test.ts server/*.test.ts"
   },
   "devDependencies": {
-    "@types/bun": "^1.4.5",
     "@types/dompurify": "^3.0.5",
+    "@types/node": "^22.13.0",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.3.0",
     "concurrently": "^10.0.7",
+    "dompurify": "^3.5.0",
+    "esbuild": "^0.28.2",
+    "highlight.js": "^11.12.0",
+    "marked": "^18.3.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "string-width": "^9.0.0",
+    "tsx": "^4.23.15",
     "typescript": "^7.0.2",
-    "vite": "^8.3.8"
-  },
-  "engines": {
-    "bun": ">=1.2"
+    "vite": "^8.3.8",
+    "zustand": "^5.1.0"
   }
 }

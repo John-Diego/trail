@@ -1,6 +1,7 @@
-import { test } from 'bun:test'
+import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { parseNameStatus, parsePatch } from './diff.ts'
+import { runTransfer, transferProgress } from './git.ts'
 import { detectMoves } from './moves.ts'
 import { extractDefs } from './symbols.ts'
 import { reconcile } from './walkthrough.ts'
@@ -383,4 +384,57 @@ test('a block relocated within one file at the same depth is still a move', () =
   assert.equal(moves.length, 1)
   assert.equal(moves[0].reindented, false)
   assert.equal(files[0].hunks.every((h) => h.pureMove), true)
+})
+
+test('git transfer progress is read as numbers only', () => {
+  assert.equal(transferProgress('Receiving objects:  45% (12345/27000), 512.00 MiB | 8.00 MiB/s'), 'downloading 45%, 512.00 MiB at 8.00 MiB/s')
+  assert.equal(transferProgress('Receiving objects: 100% (27000/27000), 1.52 GiB | 7.9 MiB/s, done.'), 'downloading 100%, 1.52 GiB at 7.9 MiB/s')
+  assert.equal(transferProgress('Resolving deltas:  12% (100/800)'), 'unpacking 12%')
+  assert.equal(transferProgress('Receiving objects: 100% (3/3), 850 bytes | 850.00 KiB/s, done.'), 'downloading 100%, 850 bytes at 850.00 KiB/s')
+  assert.equal(transferProgress('Updating files:  80% (800/1000)'), 'writing files 80%')
+  // Lines the remote server wrote, and anything else, are not passed on.
+  assert.equal(transferProgress('remote: \x1b]0;pwned\x07 Receiving objects: 99%'), null)
+  assert.equal(transferProgress('remote: Enumerating objects: 27000, done.'), null)
+  assert.equal(transferProgress("Cloning into bare repository 'x.git'..."), null)
+})
+
+const sh = (script: string, opts: Partial<Parameters<typeof runTransfer>[2]> = {}) => {
+  const seen: string[] = []
+  return { seen, done: runTransfer('sh', ['-c', script], { onProgress: (p) => seen.push(p), ...opts }) }
+}
+
+test('a transfer reports progress, including a line that arrives in two pieces', async () => {
+  const { seen, done } = sh(`printf 'Receiving objects:  10%% (1/10)\\r' >&2; printf 'Receiving objects:  50%% (5/10), 2.00 Mi' >&2; sleep 0.2; printf 'B | 1.00 MiB/s\\r' >&2; printf 'Resolving deltas: 100%% (3/3), done.\\n' >&2`)
+  await done
+  assert.deepEqual(seen, ['downloading 10%', 'downloading 50%, 2.00 MiB at 1.00 MiB/s', 'unpacking 100%'])
+})
+
+test('a failed transfer says why, without letting the remote write to the terminal', async () => {
+  const { done } = sh(`printf 'Receiving objects:  10%% (1/10)\\r' >&2; printf 'remote: \\033]0;pwned\\007Repository not found.\\033[2J\\n' >&2; printf 'fatal: could not read from remote\\n' >&2; exit 128`, { label: 'gh repo clone' })
+  await assert.rejects(done, (err: Error) => {
+    assert.match(err.message, /^gh repo clone failed: remote: .*Repository not found\..*\nfatal: could not read from remote$/s)
+    assert.doesNotMatch(err.message, /[\u0000-\u0009\u000b-\u001f\u007f-\u009f]/)
+    assert.doesNotMatch(err.message, /Receiving objects/)
+    return true
+  })
+})
+
+test('a transfer that goes silent is stopped, together with the processes it started', async () => {
+  // The shell starts a longer-lived child and waits, the way gh runs git: stopping only the
+  // shell would leave the child holding the output open.
+  const started = Date.now()
+  const { done } = sh('sleep 30 & wait', { idleMs: 300, label: 'git fetch' })
+  await assert.rejects(done, /git fetch made no progress for 0 seconds and was stopped/)
+  assert.ok(Date.now() - started < 3000, `took ${Date.now() - started} ms`)
+})
+
+test('a transfer that ignores the request to stop is ended anyway', async () => {
+  const started = Date.now()
+  const { done } = sh('trap "" TERM; sleep 30', { idleMs: 300, killGraceMs: 300 })
+  await assert.rejects(done, /made no progress/)
+  assert.ok(Date.now() - started < 4000, `took ${Date.now() - started} ms`)
+})
+
+test('a command that does not exist is reported as such', async () => {
+  await assert.rejects(runTransfer('trail-no-such-command', [], { onProgress: () => {} }), /The trail-no-such-command command was not found/)
 })

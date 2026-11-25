@@ -1,6 +1,7 @@
 // An arrow-key list for choosing a pull request in the terminal. The state, the key handling
 // and the drawing are pure functions, so they can be tested without a terminal; `pick` at the
 // bottom is the only part that touches one.
+import stringWidth from 'string-width'
 import type { PrRow } from './list.ts'
 
 export interface PickerState {
@@ -181,7 +182,7 @@ const graphemes = new Intl.Segmenter()
 
 /** Columns a string takes on screen: colour codes take none, and CJK characters and emoji take two. */
 export function width(s: string): number {
-  return Bun.stringWidth(s)
+  return stringWidth(s)
 }
 
 /** As much of the start of a string as fits in `w` columns, never splitting a character in two. */
@@ -189,7 +190,7 @@ function cut(s: string, w: number): string {
   let out = ''
   let used = 0
   for (const { segment } of graphemes.segment(s)) {
-    const next = Bun.stringWidth(segment)
+    const next = stringWidth(segment)
     if (used + next > w) break
     out += segment
     used += next
