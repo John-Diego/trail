@@ -16,6 +16,9 @@ It helps with the three things that make AI-written pull requests tiring to revi
 
 Trail is an independent project. It is not affiliated with, or endorsed by, Anthropic or GitHub.
 
+Feedback is welcome: open an [issue](https://github.com/John-Diego/trail/issues), or join the
+discussion on [LinkedIn](https://www.linkedin.com/feed/update/urn:li:activity:7532271099074539521/).
+
 ## Contents
 
 - [Requirements](#requirements) and [Install](#install)
